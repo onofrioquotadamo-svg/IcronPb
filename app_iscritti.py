@@ -269,18 +269,16 @@ def main():
   <span style='font-size:2rem;font-weight:900;letter-spacing:-1px'>PERSONAL BEST <span style='color:#4caf50'>Iscritti</span></span>
 </div>""", unsafe_allow_html=True)
 
-    # Load from cache if not in session
+    # Ripristino dati da URL query param (?gara=ID) — persiste al reload, isolato per utente
     if 'df_iscritti' not in st.session_state:
-        if os.path.exists(ICRON_CACHE_FILE):
+        gara_from_url = st.query_params.get('gara', '')
+        if gara_from_url:
             try:
-                with open(ICRON_CACHE_FILE, 'r', encoding='utf-8') as f:
-                    cache_data = json.load(f)
-                cached_rows = cache_data.get('iscritti', [])
-                if cached_rows:
-                    df_cached = pd.DataFrame(cached_rows)
-                    df_cached['PETT'] = df_cached['PETT'].astype(str).str.strip().str.replace('.0', '', regex=False)
-                    st.session_state['df_iscritti'] = df_cached
-                    st.session_state['icron_id_loaded'] = cache_data.get('id_gara', '')
+                df_restored = fetch_from_icron(gara_from_url)
+                if not df_restored.empty:
+                    df_restored['PETT'] = df_restored['PETT'].astype(str).str.strip().str.replace('.0', '', regex=False)
+                    st.session_state['df_iscritti'] = df_restored
+                    st.session_state['icron_id_loaded'] = gara_from_url
             except Exception:
                 pass
 
@@ -334,9 +332,9 @@ def main():
                                 df_icron['PETT'] = df_icron['PETT'].astype(str).str.strip().str.replace('.0', '', regex=False)
                                 st.session_state['df_iscritti'] = df_icron
                                 st.session_state['icron_id_loaded'] = id_gara
-                                with open(ICRON_CACHE_FILE, 'w', encoding='utf-8') as f:
-                                    json.dump({'id_gara': id_gara, 'iscritti': df_icron.to_dict(orient='records')}, f)
-                                st.success(f"✅ Caricati **{len(df_icron)}** iscritti — *salvati in memoria permanente*")
+                                # Salva ID nella URL — persiste al reload, unico per ogni utente
+                                st.query_params['gara'] = id_gara
+                                st.success(f"✅ Caricati **{len(df_icron)}** iscritti")
                                 st.session_state['tab_section'] = 'elenco'
                                 st.rerun()
                         except Exception as e:
