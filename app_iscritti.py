@@ -143,18 +143,15 @@ def show_pb_from_row(row):
         match = recent_bests.get(spec) or next((v for k,v in recent_bests.items() if spec.lower() in k.lower()), None)
         return f"<div style='font-size:0.75rem;color:#ffab40;margin-top:3px'>⭐ SB: {match[1]} ({match[4]})</div>" if match else ""
 
-    road_rows = df_pb[df_pb['is_road']].head(4)
-    other_rows = df_pb[~df_pb['is_road']].head(6)
-
-    road_html = "".join([f"<div style='padding:10px 0;border-bottom:1px solid #333'><div style='font-size:0.95rem;color:#a5d6a7;font-weight:600'>{r['Specialità']}</div><div style='font-size:1.6rem;font-weight:900;color:white;line-height:1.1'>{r['Prestazione']}</div><div style='font-size:0.75rem;color:#90caf9'>📍 {r['Luogo']}</div><div style='font-size:0.7rem;color:#78909c'>{r['Data']}</div>{get_sb(r['Specialità'])}</div>" for _,r in road_rows.iterrows()])
-    other_html = "".join([f"<div style='display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #2a2a2a'><span style='font-size:0.85rem;color:#bbb'>{r['Specialità']}</span><span style='font-size:1rem;font-weight:700;color:#eee'>{r['Prestazione']}</span></div>" for _,r in other_rows.iterrows()])
+    road_html = "".join([f"<div style='padding:10px 0;border-bottom:1px solid #333'><div style='font-size:0.95rem;color:#a5d6a7;font-weight:600'>{r['Specialità']}</div><div style='font-size:1.6rem;font-weight:900;color:white;line-height:1.1'>{r['Prestazione']}</div><div style='font-size:0.78rem;color:#90caf9'>📍 {r['Luogo']}</div><div style='font-size:0.7rem;color:#78909c'>{r['Data']}</div>{get_sb(r['Specialità'])}</div>" for _,r in df_pb[df_pb['is_road']].head(4).iterrows()])
+    other_html = "".join([f"<div style='display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid #2a2a2a'><span style='font-size:0.85rem;color:#bbb'>{r['Specialità']}</span><span style='font-size:1rem;font-weight:700;color:#eee'>{r['Prestazione']}</span></div>" for _,r in df_pb[~df_pb['is_road']].head(6).iterrows()])
 
     altri_label = f"<div style='margin-top:16px;font-size:0.7rem;color:#78909c;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px'>Altri Primati</div>" if other_html else ""
 
     st.markdown(f"""
 <div style="background:linear-gradient(160deg,#1a1a2e 0%,#0f3460 100%);border-radius:12px;padding:16px 18px;border-left:5px solid #4caf50;font-family:sans-serif;">
   <div style="font-size:1.4rem;font-weight:900;color:white;margin-bottom:4px">{nome}</div>
-  <div style="font-size:0.85rem;color:#81c784;margin-bottom:12px">🏅 {categoria} | 🏢 {societa}</div>
+  <div style="font-size:0.85rem;color:#81c784;margin-bottom:15px;background:rgba(0,0,0,0.2);display:inline-block;padding:2px 8px;border-radius:6px">🏅 {categoria} | 🏢 {societa}</div>
   <div style="font-size:0.75rem;color:#81c784;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">🏃 Strada / Maratona</div>
   {road_html if road_html else '<div style="color:#888;font-style:italic;font-size:0.85rem">Nessun record strada</div>'}
   {altri_label}{other_html}
@@ -168,7 +165,7 @@ def popup_atleta(row):
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
-    # Global 'WOW' Premium CSS (Unificato)
+    # Global 'WOW' Premium CSS
     st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap');
@@ -204,7 +201,6 @@ div[data-testid="stButton"] > button[kind="primary"] { background: linear-gradie
 .chevron { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); color: rgba(255,255,255,0.05); font-size: 1.2rem; }
 .athlete-link:hover .chevron { color: #4caf50; }
 
-/* Rimuove gap Streamlit tra blocchi markdown */
 [data-testid="stVerticalBlock"] > div:has(div.row-card) { margin-top: 0 !important; margin-bottom: 0 !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -212,7 +208,7 @@ div[data-testid="stButton"] > button[kind="primary"] { background: linear-gradie
     # Header
     st.markdown("<div style='display:flex;align-items:center;height:70px;margin-bottom:10px'><span style='font-size:2rem;font-weight:900;letter-spacing:-1.2px;color:white'>PERSONAL BEST <span style='color:#4caf50'>Iscritti</span></span></div>", unsafe_allow_html=True)
 
-    # URL Persistence
+    # Gara Persistence
     if 'df_iscritti' not in st.session_state:
         g = st.query_params.get('gara', '')
         if g:
@@ -221,27 +217,31 @@ div[data-testid="stButton"] > button[kind="primary"] { background: linear-gradie
                 st.session_state['df_iscritti'] = df; st.session_state['icron_id_loaded'] = g
             except: pass
 
-    # Popup Activation
+    # Popup Activation (Unica istanza sicura)
     atleta_id = st.query_params.get('atleta')
     if atleta_id and 'df_iscritti' in st.session_state:
-        match = st.session_state['df_iscritti'].query(f'PETT == "{atleta_id}"')
-        if not match.empty: popup_atleta(match.iloc[0].to_dict())
+        match = st.session_state['df_iscritti'][st.session_state['df_iscritti']['PETT'] == str(atleta_id)]
+        if not match.empty: 
+            # Per evitare loop, usiamo un flag temporaneo se necessario, ma i dialog sono modali.
+            popup_atleta(match.iloc[0].to_dict())
 
-    # Nav
+    # Navigation (LABEL Differenti per evitare collisioni ID)
     if 'tab_section' not in st.session_state: st.session_state['tab_section'] = 'elenco'
     s_now = st.session_state['tab_section']
     n1, n2, n3 = st.columns(3)
-    if n1.button("📁 Carica", use_container_width=True, type="primary" if s_now=='carica' else "secondary"): st.session_state['tab_section'] = 'carica'; st.rerun()
-    if n2.button("👥 Iscritti", use_container_width=True, type="primary" if s_now=='elenco' else "secondary"): st.session_state['tab_section'] = 'elenco'; st.rerun()
-    if n3.button("🔍 Cerca Atleta", use_container_width=True, type="primary" if s_now=='cerca' else "secondary"): st.session_state['tab_section'] = 'cerca'; st.rerun()
-    # RIMOSSO DIVIDER qui per evitare spazio eccessivo
+    if n1.button("📁 Carica Gara", use_container_width=True, key="nav_carica",
+                 type="primary" if s_now=='carica' else "secondary"): st.session_state['tab_section'] = 'carica'; st.rerun()
+    if n2.button("👥 Iscritti", use_container_width=True, key="nav_iscritti",
+                 type="primary" if s_now=='elenco' else "secondary"): st.session_state['tab_section'] = 'elenco'; st.rerun()
+    if n3.button("🔍 Ricerca", use_container_width=True, key="nav_cerca",
+                 type="primary" if s_now=='cerca' else "secondary"): st.session_state['tab_section'] = 'cerca'; st.rerun()
 
-    sect = st.session_state['tab_section']
+    sect = st.session_state.get('tab_section')
     df_raw = st.session_state.get('df_iscritti')
 
     if sect == 'carica':
-        id_g = st.text_input("ID Gara", value=st.session_state.get('icron_id_loaded', ''))
-        if st.button("⬇️ Carica", use_container_width=True, type="primary") and id_g:
+        id_g = st.text_input("ID Gara (ICRON)", value=st.session_state.get('icron_id_loaded', ''), key="input_id_gara")
+        if st.button("⬇️ Avvia Caricamento", use_container_width=True, type="primary", key="btn_load_gara") and id_g:
             try:
                 df = fetch_from_icron(id_g); df['PETT'] = df['PETT'].astype(str).str.strip().str.replace('.0', '', regex=False)
                 st.session_state['df_iscritti']=df; st.session_state['icron_id_loaded']=id_g; st.query_params['gara']=id_g; st.session_state['tab_section']='elenco'; st.rerun()
@@ -250,24 +250,19 @@ div[data-testid="stButton"] > button[kind="primary"] { background: linear-gradie
     elif sect == 'elenco':
         if df_raw is None or df_raw.empty: st.info("Nessuna gara caricata.")
         else:
-            # Data Cleaning Totale
             df_c = df_raw.copy().fillna('')
             df_c['PETT'] = df_c['PETT'].astype(str).str.strip().str.replace('.0', '', regex=False)
             df_c['P_VAL'] = pd.to_numeric(df_c['PETT'], errors='coerce').fillna(9999)
             df_c['ATLETA_TEXT'] = (df_c['COGNOME'] + ' ' + df_c['NOME']).str.strip()
+            df_c = df_c[df_c['ATLETA_TEXT'] != '']
             
-            # Filtro
-            q = st.text_input("Filtra per nome o pettorale…").strip().lower()
+            q = st.text_input("Filtra per nome o pettorale…", key="filter_input").strip().lower()
             df_s = df_c.sort_values('P_VAL').reset_index(drop=True)
             if q: df_s = df_s[df_s['ATLETA_TEXT'].str.lower().str.contains(q) | df_s['PETT'].str.contains(q)]
             
-            # Skip empty (nan) rows
-            df_s = df_s[df_s['ATLETA_TEXT'] != '']
-            
             st.caption(f"{len(df_s)} partecipanti")
             g_id = st.session_state.get('icron_id_loaded', '')
-
-            # UNIQUE HTML BLOCK - Zero Gaps, One Style
+            
             rows_html = "".join([f'''
             <a href="/?gara={g_id}&atleta={r['PETT']}" target="_self" class="athlete-link">
                 <div class="row-card">
@@ -277,14 +272,13 @@ div[data-testid="stButton"] > button[kind="primary"] { background: linear-gradie
                     <div class="meta-line"><span class="cat-badge">{r['CATEGORIA'] if r['CATEGORIA'] else '-'}</span> {r['SOCIETA']}</div>
                 </div>
             </a>''' for _, r in df_s.iterrows()])
-            
             if rows_html: st.markdown(rows_html, unsafe_allow_html=True)
 
     elif sect == 'cerca':
         if df_raw is None or df_raw.empty: st.info("Nessuna gara caricata.")
         else:
-            p = st.text_input("Numero Pettorale")
-            if st.button("🔍 Cerca Atleta", use_container_width=True, type="primary") or p:
+            p = st.text_input("Numero del Pettorale", key="search_pett_input")
+            if st.button("🔍 Mostra Scheda Atleta", use_container_width=True, type="primary", key="btn_search_athlete") or p:
                 if p: st.query_params['atleta'] = p.strip(); st.rerun()
 
 if __name__ == "__main__":
