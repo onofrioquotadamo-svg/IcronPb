@@ -222,10 +222,12 @@ div[data-testid="stButton"] > button[kind="primary"] { background: linear-gradie
     if atleta_id and 'df_iscritti' in st.session_state:
         match = st.session_state['df_iscritti'][st.session_state['df_iscritti']['PETT'] == str(atleta_id)]
         if not match.empty: 
-            # Per evitare loop, usiamo un flag temporaneo se necessario, ma i dialog sono modali.
             popup_atleta(match.iloc[0].to_dict())
+            # PULIZIA IMMEDIATA per evitare il loop al prossimo rerun/chiusura dialog
+            st.query_params['atleta'] = "" 
+            # Non facciamo rerun qui perche' il dialog e' gia' in rendering
 
-    # Navigation (LABEL Differenti per evitare collisioni ID)
+    # Navigation
     if 'tab_section' not in st.session_state: st.session_state['tab_section'] = 'elenco'
     s_now = st.session_state['tab_section']
     n1, n2, n3 = st.columns(3)
