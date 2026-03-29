@@ -279,9 +279,12 @@ div[data-testid="stButton"] > button[kind="primary"] { background: linear-gradie
     elif sect == 'cerca':
         if df_raw is None or df_raw.empty: st.info("Nessuna gara caricata.")
         else:
-            p = st.text_input("Numero del Pettorale", key="search_pett_input")
-            if st.button("🔍 Mostra Scheda Atleta", use_container_width=True, type="primary", key="btn_search_athlete") or p:
-                if p: st.query_params['atleta'] = p.strip(); st.rerun()
+            with st.form("search_atleta_form", border=False):
+                p = st.text_input("Numero del Pettorale", key="search_pett_input")
+                submit = st.form_submit_button("🔍 Mostra Scheda Atleta", use_container_width=True, type="primary")
+                if submit and p:
+                    st.query_params['atleta'] = p.strip()
+                    st.rerun()
 
 if __name__ == "__main__":
     main()
