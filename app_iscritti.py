@@ -17,120 +17,24 @@ st.set_page_config(page_title="PERSONAL BEST Iscritti", page_icon="🏅", layout
 
 # ── Core helpers ─────────────────────────────────────────────────────────────
 
-def decode_tessera(encoded_str):
-    key = b"3gabbo83"
-    try:
-        code = encoded_str.split('/')[-1]
-        code = urllib.parse.unquote(code)
-        code += "=" * ((4 - len(code) % 4) % 4)
-        dec_bytes = base64.b64decode(code)
-        tessera = ""
-        for i in range(len(dec_bytes)):
-            tessera += chr((dec_bytes[i] - key[i % len(key)]) % 256)
-        return tessera
-    except Exception:
-        return "Sconosciuta"
-
-def encode_tessera(tessera_str):
-    key = b"3gabbo83"
-    tessera_str = str(tessera_str).strip()
-    enc_bytes = bytearray()
-    for i in range(len(tessera_str)):
-        enc_bytes.append((ord(tessera_str[i]) + key[i % len(key)]) % 256)
-    b64 = base64.b64encode(enc_bytes).decode('utf-8')
-    return urllib.parse.quote(b64)
-
-def hms_to_seconds(t_str):
-    t_str = str(t_str).lower().replace('h', ':')
-    parts = t_str.split(':')
-    try:
-        if len(parts) == 3:
-            return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
-        elif len(parts) == 2:
-            return float(parts[0]) * 60 + float(parts[1])
-        return float(parts[0])
-    except Exception:
-        return 999999
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def fetch_from_icron(id_gara):
-    url = "https://www.icron.it/IcronNewGO/getIscrizioni"
-    headers = {"Content-Type": "application/json;charset=UTF-8", "Referer": "https://www.icron.it/newgo/"}
-    payload = {"idGara": str(id_gara).strip()}
-    resp = requests.post(url, json=payload, headers=headers, timeout=15)
-    resp.raise_for_status()
-    data = resp.json()
-    if data.get("esito") != "OK":
-        raise ValueError(f"ICRON errore: {data.get('messaggio', 'sconosciuto')}")
-    participants = data.get("elencoPartecipanti", [])
-    if not participants: return pd.DataFrame()
-    df = pd.DataFrame(participants)
-    rename_map = {
-        'pettorale': 'PETT', 'cognome': 'COGNOME', 'nome': 'NOME',
-        'tessera': 'TESSERA', 'categoria': 'CATEGORIA', 'squadra': 'SOCIETA',
-        'sesso': 'SESSO', 'dataNascita': 'DATA_NASCITA',
-    }
-    df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns}, inplace=True)
-    return df
-
-def extract_all_pbs(athlete_url):
-    try:
-        resp = requests.get(athlete_url, timeout=10)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        pb_data, recent_bests, perf_dates = [], {}, {}
-
-        for table in soup.find_all('table'):
-            headers = [th.get_text(strip=True).lower() for th in table.find_all('th')]
-            if not headers and table.find('tr'):
-                headers = [td.get_text(strip=True).lower() for td in table.find('tr').find_all('td')]
-
-            first_h = headers[0].lower().strip() if headers else ''
-            is_hist_table = first_h in ('anno', 'anno/data')
-            is_pb_summary = (any('specialit' in h for h in headers) or any('prestazione' in h for h in headers)) and not is_hist_table
-
-            if is_pb_summary:
-                for tr in table.find_all('tr'):
-                    cells = tr.find_all(['td', 'th'])
-                    if not cells or len(cells) < 3: continue
-                    specialty = cells[0].get_text(strip=True)
-                    if not specialty or specialty.lower() in ('gara', 'specialità', 'specialita'): continue
-                    pb_data.append({"Specialità": specialty, "Ambiente": cells[1].get_text(strip=True),
-                                    "Prestazione": cells[2].get_text(strip=True), "Data": cells[4].get_text(strip=True), 
-                                    "Luogo": cells[5].get_text(strip=True)})
-
-            if is_hist_table:
-                h_tag = table.find_previous(['h1', 'h2', 'h3', 'h4', 'h5'])
-                spec = h_tag.get_text(strip=True) if h_tag else ""
-                for tr in table.find_all('tr'):
-                    cells = tr.find_all(['td', 'th'])
-                    if len(cells) < 3: continue
-                    year_cell = cells[0].get_text(strip=True)
-                    if not (year_cell.isdigit() and len(year_cell) == 4): continue
-                    date_part = cells[1].get_text(strip=True)
-                    perf_cell = cells[6].get_text(strip=True) if len(cells) > 6 else cells[2].get_text(strip=True)
-                    full_date = f"{date_part}/{year_cell}" if date_part else year_cell
-                    perf_dates[(spec.lower(), perf_cell)] = full_date
-                    if year_cell in ['2025', '2026']:
-                        sec = hms_to_seconds(perf_cell)
-                        if spec and sec < 999999:
-                            if spec not in recent_bests or sec < recent_bests[spec][0]:
-                                recent_bests[spec] = (sec, perf_cell, cells[-1].get_text(strip=True), year_cell, full_date)
-
-        for pb in pb_data:
-            key = (pb.get('Specialità', '').lower(), pb.get('Prestazione', ''))
-            if key in perf_dates: pb['Data'] = perf_dates[key]
-        return pb_data, recent_bests
-    except Exception: return [], {}
+from fidal_utils import (
+    decode_tessera, encode_tessera, hms_to_seconds, fetch_from_icron, extract_all_pbs,
+    get_base64_logo, fetch_upcoming_icron_events
+)
 
 def show_pb_from_row(row):
-    tessera = str(row.get('TESSERA', '')).strip()
+    # Robust key access
+    def g(k): return str(row.get(k.upper(), row.get(k.lower(), ''))).strip()
+    
+    tessera = g('TESSERA')
     athlete_url = f"https://www.fidal.it/atleta/x/{encode_tessera(tessera)}"
-    nome = f"{row.get('COGNOME', '-')} {row.get('NOME', '')}".strip()
-    categoria, societa = row.get('CATEGORIA', '-'), row.get('SOCIETA', '-')
+    nome = f"{g('COGNOME')} {g('NOME')}".strip()
+    if not nome or nome == "-":
+        nome = str(row.get('ATLETA_TEXT', 'Atleta Sconosciuto'))
+    categoria, societa = g('CATEGORIA') or '-', g('SOCIETA') or '-'
 
     with st.spinner("Recupero PB da FIDAL..."):
-        pbs, recent_bests = extract_all_pbs(athlete_url)
+        pbs, recent_bests, _ = extract_all_pbs(athlete_url, nome=nome, tessera=tessera)
 
     if not pbs:
         st.warning("Nessun primato registrato su FIDAL.")
@@ -152,7 +56,7 @@ def show_pb_from_row(row):
 <div style="background:linear-gradient(160deg,#1a1a2e 0%,#0f3460 100%);border-radius:12px;padding:16px 18px;border-left:5px solid #4caf50;font-family:sans-serif;">
   <div style="font-size:1.4rem;font-weight:900;color:white;margin-bottom:4px">{nome}</div>
   <div style="font-size:0.85rem;color:#81c784;margin-bottom:15px;background:rgba(0,0,0,0.2);display:inline-block;padding:2px 8px;border-radius:6px">🏅 {categoria} | 🏢 {societa}</div>
-  <div style="font-size:0.75rem;color:#81c784;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">🏃 Strada / Maratona</div>
+  <div style="font-size:0.75rem;color:#81c784;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">🏃 Strada</div>
   {road_html if road_html else '<div style="color:#888;font-style:italic;font-size:0.85rem">Nessun record strada</div>'}
   {altri_label}{other_html}
 </div>
@@ -171,23 +75,28 @@ def main():
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap');
 html, body, [data-testid="stAppViewContainer"] { font-family: 'Outfit', sans-serif !important; background: #0e1117; color: white; }
 
+div[data-baseweb="input"] > div { background-color: white !important; }
+div[data-baseweb="input"] input { color: black !important; }
+div[data-baseweb="select"] > div { background-color: white !important; }
+div[data-baseweb="select"] * { color: black !important; }
+
 /* Control Buttons (Nav) */
 div[data-testid="stButton"] > button {
     border-radius: 12px !important; font-weight: 700 !important; font-size: 0.9rem !important;
-    background: linear-gradient(145deg, #1e2130, #161824) !important; border: 1px solid rgba(255,255,255,0.05) !important;
-    color: #999 !important; transition: all 0.2s ease !important;
+    background-color: #4caf50 !important; border: none !important;
+    color: white !important; transition: all 0.2s ease !important;
 }
-div[data-testid="stButton"] > button:hover { border-color: #4caf50 !important; color: #4caf50 !important; transform: translateY(-2px); }
-div[data-testid="stButton"] > button[kind="primary"] { background: linear-gradient(135deg, #4caf50 0%, #3d8c40 100%) !important; color: white !important; }
+div[data-testid="stButton"] > button:hover { background-color: #45a049 !important; transform: translateY(-2px); }
+div[data-testid="stButton"] > button[kind="primary"] { background: #4caf50 !important; }
 
-/* PREMIUM CARD LINK STYLE */
-.athlete-link { text-decoration: none !important; display: block !important; margin-bottom: 8px !important; }
+/* PREMIUM CARD STYLE */
 .row-card {
     background: linear-gradient(90deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.04) 100%);
     border-radius: 16px; border: 1px solid rgba(255,255,255,0.03);
     padding: 16px 20px; position: relative; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    margin-bottom: 8px; z-index: 1;
 }
-.athlete-link:hover .row-card {
+.row-card:hover {
     background: linear-gradient(90deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.09) 100%);
     border-color: rgba(76,175,80,0.5); box-shadow: 0 8px 32px rgba(0,0,0,0.4); transform: translateY(-2px);
 }
@@ -198,93 +107,155 @@ div[data-testid="stButton"] > button[kind="primary"] { background: linear-gradie
 .athlete-name { font-size: 1.15rem; font-weight: 900; color: #fff; margin-left: 12px; display: inline-block; vertical-align: middle; }
 .meta-line { font-size: 0.8rem; color: rgba(255,255,255,0.4); margin-top: 6px; font-weight: 500; }
 .meta-line .cat-badge { color: #81d4fa; background: rgba(129,212,250,0.1); padding: 1px 6px; border-radius: 4px; margin-right: 6px; font-weight: 700; }
-.chevron { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); color: rgba(255,255,255,0.05); font-size: 1.2rem; }
-.athlete-link:hover .chevron { color: #4caf50; }
+.chevron { position: absolute; right: 20px; top: 50%; transform: translateY(-50%); color: rgba(255,255,255,0.2); font-size: 1.2rem; }
 
-[data-testid="stVerticalBlock"] > div:has(div.row-card) { margin-top: 0 !important; margin-bottom: 0 !important; }
+/* Invisibility hack for cards - Level-1 DOM Strategy */
+div[data-testid="stElementContainer"]:has(.row-card) {
+    margin-bottom: -78px !important; /* Pull next container up */
+}
+div[data-testid="stElementContainer"]:has(.row-card) + div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]) {
+    position: relative;
+    z-index: 10;
+}
+div[data-testid="stElementContainer"]:has(.row-card) + div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]) button {
+    height: 70px !important;
+    background: transparent !important;
+    color: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    opacity: 0 !important;
+}
+div[data-testid="stElementContainer"]:has(.row-card) + div[data-testid="stElementContainer"]:has(div[data-testid="stButton"]) button:hover {
+    background: rgba(255,255,255,0.05) !important;
+    opacity: 1 !important;
+}
+/* Visual state for the card underneath */
+div[data-testid="stElementContainer"]:has(.row-card):hover .row-card {
+    background: linear-gradient(90deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.09) 100%);
+    border-color: rgba(76,175,80,0.5);
+    transform: translateY(-2px);
+}
 </style>
 """, unsafe_allow_html=True)
 
-    # Header
-    st.markdown("<div style='display:flex;align-items:center;height:70px;margin-bottom:10px'><span style='font-size:2rem;font-weight:900;letter-spacing:-1.2px;color:white'>PERSONAL BEST <span style='color:#4caf50'>Iscritti</span></span></div>", unsafe_allow_html=True)
-
-    # Gara Persistence
+    # Gara Persistence (Startup loading from URL)
     if 'df_iscritti' not in st.session_state:
-        g = st.query_params.get('gara', '')
+        g = st.query_params.get('gara')
         if g:
-            try:
-                df = fetch_from_icron(g); df['PETT'] = df['PETT'].astype(str).str.strip().str.replace('.0', '', regex=False)
-                st.session_state['df_iscritti'] = df; st.session_state['icron_id_loaded'] = g
-            except: pass
+            with st.spinner("Caricamento gara dall'URL..."):
+                try:
+                    df = fetch_from_icron(g)
+                    if not df.empty:
+                        st.session_state['df_iscritti'] = df
+                        st.session_state['icron_id_loaded'] = g
+                    else: st.error(f"Gara {g} trovata ma senza iscritti.")
+                except Exception as e: st.error(f"Errore: {e}")
 
-    # Popup Activation (Unica istanza sicura)
-    atleta_id = st.query_params.get('atleta')
+    # Header con Logo
+    logo_path = os.path.join(os.path.dirname(__file__), "icron_logo.png")
+    b64_logo = get_base64_logo(logo_path)
+    col_l, col_t = st.columns([1, 4])
+    if b64_logo: col_l.markdown(f'<img src="data:image/png;base64,{b64_logo}" width="180">', unsafe_allow_html=True)
+    col_t.markdown("<div style='display:flex;align-items:center;height:70px;margin-bottom:10px'><span style='font-size:2rem;font-weight:900;letter-spacing:-1.2px;color:white'>PERSONAL BEST <span style='color:#4caf50'>Iscritti</span></span></div>", unsafe_allow_html=True)
+
+    # Popup Activation (Atleta popup from URL or Session State)
+    atleta_id = st.query_params.get('atleta') or st.session_state.get('trigger_popup')
     if atleta_id and 'df_iscritti' in st.session_state:
-        match = st.session_state['df_iscritti'][st.session_state['df_iscritti']['PETT'] == str(atleta_id)]
+        df_curr = st.session_state['df_iscritti']
+        match = df_curr[df_curr['PETT'].astype(str) == str(atleta_id)]
+        if match.empty: match = df_curr[df_curr['TESSERA'].astype(str) == str(atleta_id)]
         if not match.empty: 
             popup_atleta(match.iloc[0].to_dict())
-            # PULIZIA IMMEDIATA per evitare il loop al prossimo rerun/chiusura dialog
+            if 'trigger_popup' in st.session_state: del st.session_state['trigger_popup']
             st.query_params['atleta'] = "" 
-            # Non facciamo rerun qui perche' il dialog e' gia' in rendering
 
     # Navigation
     if 'tab_section' not in st.session_state: st.session_state['tab_section'] = 'elenco'
     s_now = st.session_state['tab_section']
     n1, n2, n3 = st.columns(3)
-    if n1.button("📁 Carica Gara", use_container_width=True, key="nav_carica",
-                 type="primary" if s_now=='carica' else "secondary"): st.session_state['tab_section'] = 'carica'; st.rerun()
-    if n2.button("👥 Iscritti", use_container_width=True, key="nav_iscritti",
-                 type="primary" if s_now=='elenco' else "secondary"): st.session_state['tab_section'] = 'elenco'; st.rerun()
-    if n3.button("🔍 Ricerca", use_container_width=True, key="nav_cerca",
-                 type="primary" if s_now=='cerca' else "secondary"): st.session_state['tab_section'] = 'cerca'; st.rerun()
+    if n1.button("📁 Carica Gara", use_container_width=True, key="nav_carica", type="primary" if s_now=='carica' else "secondary"): st.session_state['tab_section'] = 'carica'; st.rerun()
+    if n2.button("👥 Iscritti", use_container_width=True, key="nav_iscritti", type="primary" if s_now=='elenco' else "secondary"): st.session_state['tab_section'] = 'elenco'; st.rerun()
+    if n3.button("🔍 Ricerca", use_container_width=True, key="nav_cerca", type="primary" if s_now=='cerca' else "secondary"): st.session_state['tab_section'] = 'cerca'; st.rerun()
 
     sect = st.session_state.get('tab_section')
     df_raw = st.session_state.get('df_iscritti')
 
     if sect == 'carica':
-        id_g = st.text_input("ID Gara (ICRON)", value=st.session_state.get('icron_id_loaded', ''), key="input_id_gara")
-        if st.button("⬇️ Avvia Caricamento", use_container_width=True, type="primary", key="btn_load_gara") and id_g:
+        st.markdown("<div style='margin-bottom:20px; padding:15px; background:rgba(255,255,255,0.05); border-radius:10px; border-left:4px solid #4caf50;'><h3 style='margin:0; font-size:1.1rem; color:#4caf50;'>Scegli tra le prossime gare o inserisci ID Gara</h3></div>", unsafe_allow_html=True)
+        if 'upcoming_events' not in st.session_state: st.session_state['upcoming_events'] = fetch_upcoming_icron_events(10)
+        up_events = st.session_state.get('upcoming_events', [])
+        if up_events:
+            event_options = ["-- Seleziona una gara --"] + [f"{e['dataEvento']} - {e['descrizione']}" for e in up_events]
+            sel_event = st.selectbox("Seleziona Gara", options=event_options)
+            if sel_event != event_options[0]:
+                idx = event_options.index(sel_event) - 1
+                st.session_state['input_id_gara'] = str(up_events[idx]['idGara'])
+            id_g = st.text_input("ID Gara (ICRON)", key="input_id_gara")
+        else:
+            id_g = st.text_input("ID Gara (ICRON)", value=st.session_state.get('icron_id_loaded', ''), key="input_id_gara")
+
+        if st.button("⬇️ Avvia Caricamento", use_container_width=True, type="primary") and id_g:
             try:
-                df = fetch_from_icron(id_g); df['PETT'] = df['PETT'].astype(str).str.strip().str.replace('.0', '', regex=False)
-                st.session_state['df_iscritti']=df; st.session_state['icron_id_loaded']=id_g; st.query_params['gara']=id_g; st.session_state['tab_section']='elenco'; st.rerun()
+                df = fetch_from_icron(id_g)
+                if not df.empty:
+                    st.session_state['df_iscritti'] = df
+                    st.session_state['icron_id_loaded'] = id_g
+                    st.query_params['gara'] = id_g
+                    st.session_state['tab_section'] = 'elenco'
+                    st.rerun()
+                else: st.error("Nessun iscritto trovato.")
             except Exception as e: st.error(f"Errore: {e}")
 
     elif sect == 'elenco':
         if df_raw is None or df_raw.empty: st.info("Nessuna gara caricata.")
         else:
             df_c = df_raw.copy().fillna('')
-            df_c['PETT'] = df_c['PETT'].astype(str).str.strip().str.replace('.0', '', regex=False)
             df_c['P_VAL'] = pd.to_numeric(df_c['PETT'], errors='coerce').fillna(9999)
             df_c['ATLETA_TEXT'] = (df_c['COGNOME'] + ' ' + df_c['NOME']).str.strip()
-            df_c = df_c[df_c['ATLETA_TEXT'] != '']
-            
             q = st.text_input("Filtra per nome o pettorale…", key="filter_input").strip().lower()
             df_s = df_c.sort_values('P_VAL').reset_index(drop=True)
             if q: df_s = df_s[df_s['ATLETA_TEXT'].str.lower().str.contains(q) | df_s['PETT'].str.contains(q)]
             
             st.caption(f"{len(df_s)} partecipanti")
-            g_id = st.session_state.get('icron_id_loaded', '')
             
-            rows_html = "".join([f'''
-            <a href="/?gara={g_id}&atleta={r['PETT']}" target="_self" class="athlete-link">
-                <div class="row-card">
-                    <span class="chevron">›</span>
-                    <span class="bib-pill">#{r['PETT']}</span>
-                    <span class="athlete-name">{r['ATLETA_TEXT']}</span>
-                    <div class="meta-line"><span class="cat-badge">{r['CATEGORIA'] if r['CATEGORIA'] else '-'}</span> {r['SOCIETA']}</div>
-                </div>
-            </a>''' for _, r in df_s.iterrows()])
-            if rows_html: st.markdown(rows_html, unsafe_allow_html=True)
+            @st.fragment
+            def list_fragment(df_to_show):
+                for _, r in df_to_show.iterrows():
+                    link_id = str(r['PETT'])
+                    # Card Visuale
+                    st.markdown(f'''
+                    <div class="row-card card-trigger">
+                        <span class="chevron">›</span>
+                        <span class="bib-pill">#{link_id}</span>
+                        <span class="athlete-name">{r['ATLETA_TEXT']}</span>
+                        <div class="meta-line"><span class="cat-badge">{r['CATEGORIA'] or '-'}</span> {r['SOCIETA']} (Tess: {r['TESSERA']})</div>
+                    </div>''', unsafe_allow_html=True)
+                    
+                    # Invisible Button Overlay
+                    if st.button("", key=f"btn_{link_id}", use_container_width=True):
+                        # Open the popup immediately from within the fragment
+                        popup_atleta(r.to_dict())
+            
+            list_fragment(df_s)
 
     elif sect == 'cerca':
         if df_raw is None or df_raw.empty: st.info("Nessuna gara caricata.")
         else:
             with st.form("search_atleta_form", border=False):
-                p = st.text_input("Numero del Pettorale", key="search_pett_input")
+                p = st.text_input("Numero del Pettorale o Tessera", key="search_pett_input")
                 submit = st.form_submit_button("🔍 Mostra Scheda Atleta", use_container_width=True, type="primary")
                 if submit and p:
-                    st.query_params['atleta'] = p.strip()
-                    st.rerun()
+                    p_val = p.strip()
+                    m = df_raw[(df_raw['PETT'].astype(str) == p_val) | (df_raw['TESSERA'].astype(str) == p_val)]
+                    if not m.empty:
+                        link_id = str(m.iloc[0]['PETT'])
+                        st.session_state['trigger_popup'] = link_id
+                        st.query_params['atleta'] = link_id
+                        st.rerun()
+                    else: st.error("Atleta non trovato.")
 
 if __name__ == "__main__":
     main()

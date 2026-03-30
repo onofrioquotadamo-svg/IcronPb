@@ -1,5 +1,6 @@
-streamlit
+streamlit==1.31.1
+pandas
 requests
 beautifulsoup4
-pandas
+fpdf2
 lxml
