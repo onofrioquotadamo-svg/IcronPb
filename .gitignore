@@ -1,0 +1,5 @@
+*.json
+*.csv
+*.html
+__pycache__/
+.streamlit/cache/
